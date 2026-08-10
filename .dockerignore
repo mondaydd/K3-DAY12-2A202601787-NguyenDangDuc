@@ -1,6 +1,18 @@
-# TODO (CP2): file này quyết định thứ KHÔNG được copy vào image.
-# Bỏ sót .env = leak secret vào image. Bỏ sót .git = image phình to.
-# Bổ sung đủ các mục còn thiếu — xem tests/test_cp2.py để biết yêu cầu.
+# Những thứ KHÔNG được copy vào Docker image.
+# Bỏ sót .env = secret lọt vào image → ai pull image là có key.
+# Bỏ sót .git = image phình to thêm ~50MB vô ích.
+# Bỏ sót .venv = thư viện trên máy bạn vào image → xung đột với pip install.
 
 .git
 .gitignore
+.env
+.env.example
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+tests/
+screenshots/
+*.md

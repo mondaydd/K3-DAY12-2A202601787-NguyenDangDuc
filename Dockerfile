@@ -1,34 +1,49 @@
 # ═══════════════════════════════════════════════════════════════════
-# CP2 — Containerization
-#
-# Dưới đây là Dockerfile "chạy được nhưng chưa production": một stage,
-# chạy bằng user root, không có health check, base image nặng.
-#
-# NHIỆM VỤ: sửa file này thành bản production-ready. Yêu cầu:
-#   [ ] Multi-stage build: stage `builder` cài dependency, stage runtime
-#       chỉ copy kết quả sang → image nhỏ hơn, không mang theo compiler.
-#       Cú pháp: `FROM python:3.11-slim AS builder`
-#   [ ] Base image slim (hoặc alpine), không dùng `python:3.11` bản đầy đủ
-#   [ ] COPY requirements.txt và pip install TRƯỚC khi COPY source code
-#       (Docker cache theo layer: sửa 1 dòng code không phải cài lại thư viện)
-#   [ ] Tạo user thường và chuyển sang bằng lệnh `USER` — container chạy
-#       root nghĩa là ai thoát được khỏi app cũng thành root trên host
-#   [ ] Có `HEALTHCHECK` gọi vào endpoint /health
-#   [ ] Đọc cổng từ biến môi trường PORT (cloud tự gán cổng, không cố định 8000)
-#
-# Kiểm tra:  pytest tests/test_cp2.py -v
-# Build thử: docker build -t day12-agent:prod .
-#            docker images day12-agent:prod     # xem dung lượng
+# CP2 — Multi-stage Dockerfile (production-ready)
 # ═══════════════════════════════════════════════════════════════════
 
-FROM python:3.11
+# ── Stage 1: builder ────────────────────────────────────────────────
+# Stage này chỉ dùng để cài thư viện Python. Nó có thể nặng vì sẽ bị
+# bỏ đi sau khi copy kết quả sang stage runtime.
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-COPY . .
+# Copy requirements.txt TRƯỚC, rồi mới pip install.
+# Lý do: Docker cache theo từng layer. Nếu requirements.txt không đổi,
+# Docker dùng cache layer pip install → build nhanh hơn nhiều.
+# Nếu COPY . . trước thì mỗi lần sửa 1 dòng code = cài lại toàn bộ thư viện.
+COPY requirements.txt .
 
-RUN pip install -r requirements.txt
+# Cài vào /install thay vì /usr/local mặc định → dễ copy sang stage sau
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# ── Stage 2: runtime ────────────────────────────────────────────────
+# Stage cuối — đây là image thật được dùng trên production.
+# Không có compiler, không có cache pip → nhỏ gọn.
+FROM python:3.11-slim AS runtime
+
+WORKDIR /app
+
+# Copy kết quả pip install từ stage builder sang
+# (chỉ lấy thư viện đã cài, không mang theo compiler)
+COPY --from=builder /install /usr/local
+
+# Copy source code (làm SAU khi cài thư viện để tận dụng cache Docker)
+COPY app ./app
+COPY utils ./utils
+
+# Tạo user thường (không phải root) — bảo mật:
+# Nếu ai thoát được khỏi app, họ chỉ là appuser, không phải root trên host.
+RUN useradd --create-home --uid 10001 appuser
+USER appuser
+
+# Kiểm tra process còn sống không (liveness probe của Docker)
+# Gọi /health mỗi 30 giây, timeout 5s, thử lại 3 lần trước khi báo unhealthy
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()" || exit 1
+
+# Đọc PORT từ biến môi trường (Railway/Render tự gán cổng, không cố định 8000)
+# ${PORT:-8000} nghĩa là: dùng $PORT nếu có, không thì dùng 8000
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
