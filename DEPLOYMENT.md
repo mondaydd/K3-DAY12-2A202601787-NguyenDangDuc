@@ -12,7 +12,7 @@
 |-----|----------|
 | Họ và tên | Nguyễn Đăng Đức |
 | Mã học viên | 2A202601787 |
-| Repo | K3DAY12-2A202601787-NguyenDangDuc |
+| Repo | K3-DAY12-2A202601787-NguyenDangDuc |
 
 ## Service
 
